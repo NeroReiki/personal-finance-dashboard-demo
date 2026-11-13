@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="https://unpkg.com/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Apply the saved theme before painting the page; no extra library or server call. -->
+  <script>
+    (function() {
+      try {
+        if (localStorage.getItem('finance-dashboard-theme') === 'light') {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      } catch (e) { /* Storage may be unavailable in some embedded browsers. */ }
+    })();
+  </script>
+
+  <style>
+    :root {
+      --bg-page: #121826; --bg-card: #1e293b; --bg-input: #0f172a; --bg-nav: rgba(15, 23, 42, 0.85);
+      --text-main: #f1f5f9; --text-muted: #94a3b8; --text-heading: #f8fafc;
+      --border-color: #334155;
+      --accent-green: #a7f3d0; --accent-green-text: #064e3b; --accent-purple: #c084fc; 
+      --accent-red: #fda4af; --accent-yellow: #fde047;
+      --btn-secondary: #334155; --btn-secondary-text: #cbd5e1;
+      --shadow: 0 4px 12px rgba(0,0,0,0.3); --map-bg: #1e293b; --loan-label:#fde047;
+    }
+
+    /* Lightweight theme: CSS variables only, no extra network requests. */
+    :root { color-scheme: dark; }
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg-page: #f5f7fb; --bg-card: #ffffff; --bg-input: #f1f5f9;
+      --bg-nav: rgba(255,255,255,0.94);
+      --text-main: #1e293b; --text-muted: #64748b; --text-heading: #0f172a;
+      --border-color: #dbe4ee;
+      --accent-green: #bbf7d0; --accent-green-text: #14532d;
+      --accent-purple: #6d28d9; --accent-red: #fecdd3; --accent-yellow: #fde68a;
+      --btn-secondary: #e2e8f0; --btn-secondary-text: #334155;
+      --shadow: 0 3px 12px rgba(15,23,42,0.07); --map-bg: #e2e8f0; --loan-label:#a16207;
+    }
+    .theme-topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 1px 12px; }
+    .theme-brand { font-size:0.8rem; font-weight:800; letter-spacing:1.4px; color:var(--text-muted); }
+    .theme-toggle { padding:8px 12px; border:1px solid var(--border-color); border-radius:999px; background:var(--bg-card); color:var(--text-heading); font-size:0.8rem; font-weight:700; cursor:pointer; white-space:nowrap; }
+    .theme-toggle:focus-visible { outline:2px solid var(--accent-purple); outline-offset:2px; }
+    :root[data-theme="light"] .leaflet-layer,
+    :root[data-theme="light"] .leaflet-control-zoom-in,
+    :root[data-theme="light"] .leaflet-control-zoom-out,
+    :root[data-theme="light"] .leaflet-control-attribution { filter:none; }
+    :root[data-theme="light"] .balance-amount { background:linear-gradient(135deg,#047857,#10b981); -webkit-background-clip:text; background-clip:text; }
+    :root[data-theme="light"] .single-summary-card .val { color:#047857; }
+    :root[data-theme="light"] #totalCommitmentHeader { color:#be123c !important; }
+    :root[data-theme="light"] #totalLoanHeader { color:#a16207 !important; }
+    :root[data-theme="light"] .leaflet-popup-content [style*="color:#f43f5e"] { color:#be123c !important; }
+    * { box-sizing: border-box; font-family: 'Plus Jakarta Sans', sans-serif; -webkit-tap-highlight-color: transparent; }
+    html, body { background-color: var(--bg-page); margin: 0; padding: 0; width: 100%; height: 100%; color: var(--text-main); overflow-x: hidden; }
+    .app-wrapper { padding: 14px 14px 90px 14px; width: 100%; max-width: 500px; margin: 0 auto; min-height: 100vh; }
+    .unified-dashboard-card { background: var(--bg-card); border-radius: 20px; padding: 20px 16px; box-shadow: var(--shadow); border: 1px solid var(--border-color); margin-bottom: 16px; }
+    .balance-header-center { text-align: center; padding-bottom: 16px; margin-bottom: 16px; border-bottom: 1px dashed var(--border-color); }
+    .balance-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; }
+    .balance-amount { font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, var(--accent-green) 0%, #34d399 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: -1px; margin-bottom: 12px; }
+
+    .filter-grid, .custom-date-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+    .custom-date-row { display: none; margin-top: 8px; }
+    select, input, .bank-select, .date-filter-input { width: 100%; padding: 14px; border-radius: 12px; border: 1px solid var(--border-color); font-size: 1rem; background: var(--bg-input); color: var(--text-heading); cursor: pointer; outline: none; }
+    .bank-select, .date-filter-input { padding: 10px; font-size: 0.82rem; font-weight: 600; text-align: center; }
+    input, select { margin-bottom: 6px; margin-top: 6px; }
+
+    .chart-stack { display: flex; flex-direction: column; gap: 16px; }
+    .chart-box { background: var(--bg-input); border-radius: 14px; padding: 14px; border: 1px solid var(--border-color); }
+    .chart-title { font-size: 0.9rem; font-weight: 700; color: var(--text-heading); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .chart-hint { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; background: var(--bg-card); padding: 2px 6px; border-radius: 4px; }
+    
+    .compact-canvas-container { position: relative; width: 100%; height: 240px; border-radius: 8px; overflow: hidden; }
+    /* Enlarge existing Chart.js canvases, without loading a new chart or library. */
+    .chart-expand-btn { padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-card); color: var(--text-heading); font-size: 0.75rem; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+    .chart-expand-btn:focus-visible, .chart-fullscreen-close:focus-visible { outline: 2px solid var(--accent-purple); outline-offset: 2px; }
+    .chart-expand-btn:hover { border-color: var(--accent-purple); }
+    .chart-fullscreen-overlay[hidden] { display: none !important; }
+    .chart-fullscreen-overlay { position: fixed; inset: 0; z-index: 1950; background: var(--bg-page); display: flex; overflow-y: auto; }
+    .chart-fullscreen-panel { width: 100%; max-width: 960px; min-height: 100%; margin: 0 auto; padding: 18px 14px max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+    .chart-fullscreen-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .chart-fullscreen-header h2 { margin: 0; font-size: 1.14rem; color: var(--text-heading); }
+    .chart-fullscreen-hint { color: var(--text-muted); font-size: 0.78rem; margin: 7px 0 0; }
+    .chart-fullscreen-close { flex-shrink: 0; padding: 10px 12px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-heading); border-radius: 10px; font-weight: 700; cursor: pointer; }
+    .chart-fullscreen-slot { flex: 1 1 auto; min-height: 340px; border: 1px solid var(--border-color); border-radius: 16px; background: var(--bg-input); padding: 12px; display: flex; }
+    .chart-fullscreen-slot > .compact-canvas-container { height: auto; min-height: 315px; flex: 1 1 auto; overflow: visible; }
+    body.chart-expanded { overflow: hidden; }
+    @media (max-height: 520px) { .chart-fullscreen-slot { min-height: 260px; } .chart-fullscreen-slot > .compact-canvas-container { min-height: 238px; } }
+
+    @keyframes pulse-skeleton { 0% { background-color: var(--bg-card); } 50% { background-color: var(--border-color); } 100% { background-color: var(--bg-card); } }
+    .skeleton-loader { position: absolute; top: 0; left: 0; right: 0; bottom: 0; border-radius: 8px; animation: pulse-skeleton 1.5s infinite ease-in-out; z-index: 1; }
+    canvas { position: relative; z-index: 2; opacity: 0; transition: opacity 0.3s ease-in; }
+    canvas.loaded { opacity: 1; }
+
+    .leaflet-popup-content-wrapper { background: var(--bg-card); color: var(--text-heading); border-radius: 12px; box-shadow: var(--shadow); }
+    .leaflet-popup-tip { background: var(--bg-card); }
+    .leaflet-popup-content { margin: 12px 14px; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .leaflet-layer, .leaflet-control-zoom-in, .leaflet-control-zoom-out, .leaflet-control-attribution { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%); }
+
+    .summary-header-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .summary-card { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 14px; padding: 14px 10px; text-align: center; }
+    .summary-card .val { font-size: 1.3rem; font-weight: 800; margin-top: 4px; }
+    .single-summary-card { background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 16px; padding: 18px; text-align: center; margin-bottom: 16px; }
+    .single-summary-card .val { font-size: 2.2rem; font-weight: 800; color: var(--accent-green); margin-top: 4px; }
+
+    .card { background: var(--bg-card); border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: var(--shadow); border: 1px solid var(--border-color); }
+    .header-title { font-size: 1.1rem; font-weight: 700; color: var(--text-heading); margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    label.subtitle { font-size: 0.85rem; color: var(--text-muted); display: block; margin-top: 12px; }
+
+    .btn { width: 100%; background: var(--accent-purple); color: #ffffff; border: none; padding: 16px; border-radius: 12px; font-weight: 700; font-size: 1rem; cursor: pointer; margin-top: 14px; transition: all 0.15s ease-in-out; }
+    .btn-secondary { background: var(--accent-green); color: var(--accent-green-text); }
+    .btn-cancel { background: var(--btn-secondary); color: var(--btn-secondary-text); }
+    .btn-add-sm { background: var(--bg-input); color: var(--accent-purple); border: 1px dashed var(--border-color); padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer; }
+    .btn-pay-sm { background: var(--accent-green); color: var(--accent-green-text); border: none; padding: 6px 12px; border-radius: 8px; font-size: 0.78rem; font-weight: 700; cursor: pointer; }
+
+    .btn:active, .btn-add-sm:active { transform: scale(0.96); opacity: 0.9; }
+    .income-pagination { border-top: 1px solid var(--border-color); margin-top: 12px; padding-top: 12px; }
+    .income-pagination-summary { color: var(--text-muted); font-size: 0.75rem; text-align: center; margin-bottom: 10px; }
+    .income-pagination-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .income-pagination-actions .btn-add-sm { min-width: 86px; }
+    .income-pagination-actions .btn-add-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+    #sideIncomePageIndicator { font-size: 0.8rem; color: var(--text-muted); font-weight: 700; text-align: center; }
+
+    .item-card { display: flex; justify-content: space-between; align-items: center; padding: 14px; border-radius: 12px; background: var(--bg-input); margin-bottom: 8px; border: 1px solid var(--border-color); }
+    .item-actions { display: flex; align-items: center; gap: 8px; }
+    .action-btn { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.95rem; padding: 4px; }
+    
+    .checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; color: var(--text-main); font-size: 0.78rem;}
+    .checkbox-label input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent-green); cursor: pointer; margin: 0; }
+    
+    .tag { font-size: 0.78rem; padding: 6px 10px; border-radius: 20px; font-weight: 700; }
+    .tag-income { background: var(--accent-green); color: var(--accent-green-text); }
+    .tag-expense { background: var(--accent-red); color: #881337; }
+
+    .nav-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg-nav); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; border-top: 1px solid var(--border-color); z-index: 1000; max-width: 500px; margin: 0 auto; }
+    .nav-item { flex: 1; text-align: center; padding: 12px 0; font-size: 0.72rem; color: var(--text-muted); cursor: pointer; transition: color 0.15s ease-in-out; }
+    .nav-item.active { color: var(--accent-purple); font-weight: 800; border-top: 2px solid var(--accent-purple); }
+    
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeSlideUp 0.4s ease forwards; }
+    @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 2000; align-items: center; justify-content: center; padding: 16px; }
+    .modal-overlay.active { display: flex; }
+    .modal-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 18px; padding: 20px; width: 100%; max-width: 400px; box-shadow: var(--shadow); }
+    .modal-title { font-size: 1.1rem; font-weight: 700; color: var(--text-heading); margin-bottom: 14px; }
+    .modal-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+    
+    .toast-notification { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: var(--accent-purple); color: #ffffff; padding: 12px 24px; border-radius: 30px; font-weight: 700; font-size: 0.9rem; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: top 0.4s ease; z-index: 3000; }
+    .income-record-info { min-width: 0; flex: 1; padding-right: 8px; }
+    .income-record-title { font-size: 0.93rem; font-weight: 700; color: var(--text-heading); overflow-wrap: anywhere; }
+    .income-record-subtitle { font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; overflow-wrap: anywhere; }
+    .empty-income { padding: 24px 8px; text-align: center; color: var(--text-muted); font-size: 0.87rem; }
+    .linked-record { color: var(--text-muted); font-size: 0.7rem; border: 1px solid var(--border-color); padding: 5px; border-radius: 6px; }
+    .item-card { gap: 8px; }
+    .item-card .tag { flex-shrink: 0; white-space: nowrap; }
+    .item-actions { flex-shrink: 0; }
+    @media (max-width: 380px) { .item-card { padding: 10px; } .item-card .tag { font-size: 0.68rem; padding: 5px 7px; } }
+    /* #region PUBLIC READ-ONLY DEMO */
+    .demo-banner { display:flex; flex-direction:column; gap:6px; background:rgba(34,211,238,.09); color:var(--text-main); border:1px solid rgba(34,211,238,.4); border-radius:14px; padding:13px 15px; margin-bottom:14px; font-size:.8rem; line-height:1.5; }
+    .demo-banner strong { color:#22d3ee; letter-spacing:.04em; font-size:.78rem; }
+    :root[data-theme="light"] .demo-banner strong { color:#0e7490; }
+    /* Public visitors cannot edit: hide all editing controls while retaining filters/pagination. */
+    #tab-commitments .btn-add-sm,
+    #tab-commitments .btn-pay-sm,
+    #tab-commitments .action-btn,
+    #tab-commitments input[type="checkbox"],
+    #tab-history .action-btn,
+    #tab-grab .action-btn { display:none !important; }
+    /* #endregion */
+  </style>
+</head>
+<body>
+
+  <div id="toast" class="toast-notification">Message</div>
+
+  <div class="app-wrapper">
+    <div class="demo-banner" role="status">
+      <strong>🔎 PUBLIC DEMO — READ ONLY</strong>
+      <span>All transactions, balances, GPS markers and accounts are fictional sample data. Explore charts, filters and history; editing is disabled.</span>
+    </div>
+    <header class="theme-topbar">
+      <span class="theme-brand">MY FINANCE · PUBLIC DEMO</span>
+      <button type="button" class="theme-toggle" id="themeToggleBtn" onclick="toggleTheme()" aria-label="Switch to light mode" aria-pressed="false">☀️ Light</button>
+    </header>
+
+    <!-- TAB 1: DASHBOARD -->
+    <div id="tab-dashboard" class="tab-content active">
+      <div class="unified-dashboard-card">
+        <div class="balance-header-center">
+          <div class="balance-title">Current Balance</div>
+          <div class="balance-amount" id="balanceText">RM 0.00</div>
+          
+          <div class="filter-grid">
+            <select id="accountSelect" class="bank-select" onchange="onFilterChange()"><option value="ALL">All Accounts</option></select>
+            <select id="dateFilterSelect" class="bank-select" onchange="onDateFilterTypeChange()">
+              <option value="ALL">All Time</option>
+              <option value="THIS_MONTH" selected>This Month</option>
+              <option value="LAST_MONTH">Last Month</option>
+              <option value="CUSTOM">Custom Range</option>
+            </select>
+          </div>
+
+          <div id="customDateRow" class="custom-date-row">
+            <input type="date" id="filterStartDate" class="date-filter-input" onchange="onFilterChange()">
+            <input type="date" id="filterEndDate" class="date-filter-input" onchange="onFilterChange()">
+          </div>
+
+          <div style="margin-top: 8px;">
+            <button type="button" class="btn-add-sm" style="width: 100%; text-align: center;" onclick="toggleCategoryFilterPanel()">🏷 Filter Categories (<span id="catFilterCountText">Loading...</span>)</button>
+            <div id="categoryFilterPanel" style="display: none; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-top: 6px; text-align: left;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-heading);">Included Categories:</span>
+                <div>
+                  <button type="button" onclick="selectAllCategories(true)" style="background:none; border:none; color:var(--accent-green); font-size:0.75rem; cursor:pointer; font-weight:bold;">All</button> | 
+                  <button type="button" onclick="selectAllCategories(false)" style="background:none; border:none; color:var(--accent-red); font-size:0.75rem; cursor:pointer; font-weight:bold;">None</button>
+                </div>
+              </div>
+              <div id="categoryCheckboxContainer" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 140px; overflow-y: auto;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="chartLoadStatus" role="status" style="display:none;margin-bottom:12px;padding:12px;border:1px solid var(--border-color);border-radius:10px;font-size:.8rem;color:var(--text-main);"></div>
+        <div class="chart-stack">
+          <div class="chart-box"><div class="chart-title"><span>🍕 Expenses by Category</span><button type="button" class="chart-expand-btn" onclick="openChartFullscreen('pie')" aria-label="Expand expenses by category chart">⛶ Expand</button></div><div class="compact-canvas-container"><div class="skeleton-loader" id="skel-pie"></div><canvas id="pieChart1" aria-label="Expenses by category pie chart"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title"><span>🗺️ GPS Spending Map</span></div><div id="mapContainer" class="compact-canvas-container" style="background: var(--map-bg);"></div></div>
+          <div class="chart-box"><div class="chart-title"><span>📈 Daily Cashflow Trend</span><button type="button" class="chart-expand-btn" onclick="openChartFullscreen('line')" aria-label="Expand daily cashflow trend chart">⛶ Expand</button></div><div class="compact-canvas-container"><div class="skeleton-loader" id="skel-line"></div><canvas id="lineChart" aria-label="Daily cashflow trend line chart"></canvas></div></div>
+          <div class="chart-box"><div class="chart-title"><span>📊 Cashflow Comparison</span><button type="button" class="chart-expand-btn" onclick="openChartFullscreen('bar')" aria-label="Expand cashflow comparison chart">⛶ Expand</button></div><div class="compact-canvas-container"><div class="skeleton-loader" id="skel-bar"></div><canvas id="barChart" aria-label="Cashflow comparison bar chart"></canvas></div></div>
+        </div>
+      </div>
+    </div>
+    <!-- TAB 2: RECORD TRANSACTION (PUBLIC READ-ONLY PREVIEW) -->
+    <div id="tab-tx" class="tab-content">
+      <div class="card">
+        <div class="header-title">➕ Record Transaction <span style="font-size:0.7rem; color:var(--text-muted)">DEMO PREVIEW</span></div>
+        <p style="font-size:0.8rem; line-height:1.7; color:var(--text-muted)">This is how the original application records income and expenses. The public demo is read-only, so saving and GPS collection are disabled.</p>
+        <fieldset disabled style="border:0;padding:0;margin:0;opacity:.7">
+          <label class="subtitle" for="demoTxType">Type:</label>
+          <select id="demoTxType"><option>Expense (-)</option><option>Income (+)</option></select>
+          <label class="subtitle" for="demoTxAmount">Amount (RM):</label>
+          <input type="number" id="demoTxAmount" placeholder="0.00">
+          <label class="subtitle" for="demoTxCategory">Category:</label>
+          <select id="demoTxCategory"><option>Food</option><option>Groceries</option><option>Transport</option><option>Bill</option><option>Other</option></select>
+          <label class="subtitle" for="demoTxLocation">Location:</label>
+          <input type="text" id="demoTxLocation" placeholder="Sample location">
+          <label class="subtitle" for="demoTxAccount">Bank / Wallet Account:</label>
+          <select id="demoTxAccount"><option>Demo Checking</option><option>Demo Savings</option><option>Demo eWallet</option></select>
+          <label class="subtitle" for="demoTxNotes">Notes:</label>
+          <input type="text" id="demoTxNotes" placeholder="Sample transaction notes">
+          <button type="button" class="btn">Save with GPS 📍 (Disabled in Demo)</button>
+        </fieldset>
+      </div>
+    </div>
+
+    <!-- TAB 3: TRANSACTION HISTORY -->
+    <div id="tab-history" class="tab-content">
+      <div class="card">
+        <div class="header-title"><span>📜 History Log</span><span id="historyCountTag" style="font-size: 0.8rem; color: var(--text-muted);">0 items</span></div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;">
+          <select id="historyCategoryFilter" onchange="resetHistoryPaginationAndRender()" style="margin: 0; font-size: 0.85rem;"><option value="ALL">All Categories</option></select>
+          <input type="text" id="historySearch" placeholder="🔍 Search..." oninput="resetHistoryPaginationAndRender()" style="margin: 0; font-size: 0.85rem;">
+        </div>
+        <div id="historyListContainer">Loading transaction history...</div>
+        <div id="historyPaginationControls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; gap: 8px;">
+          <button class="btn-add-sm" id="btnPrevPage" onclick="changeHistoryPage(-1)">◀ Prev</button>
+          <span id="historyPageIndicator" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Page 1 of 1</span>
+          <button class="btn-add-sm" id="btnNextPage" onclick="changeHistoryPage(1)">Next ▶</button>
+        </div>
+        <button class="btn-add-sm" id="btnToggleShowAll" onclick="toggleShowAllHistory()" style="width: 100%; margin-top: 8px; text-align: center;">👁️ Show All History</button>
+      </div>
+    </div>
+
+    <!-- TAB 4: COMMITMENTS & LOANS -->
+    <div id="tab-commitments" class="tab-content">
+      <div class="summary-header-grid">
+        <div class="summary-card"><div class="subtitle" style="margin-top:0;">Unpaid Commitments</div><div class="val" id="totalCommitmentHeader" style="color: var(--accent-red);">RM 0.00</div></div>
+        <div class="summary-card"><div class="subtitle" style="margin-top:0;">Total Loans</div><div class="val" id="totalLoanHeader" style="color: var(--accent-yellow);">RM 0.00</div></div>
+      </div>
+      <div class="card"><div class="header-title"><span>📅 Monthly Commitments</span><button class="btn-add-sm" onclick="openCommitmentModal('Monthly')">➕ Add</button></div><div id="monthlyCommitmentList">Loading...</div></div>
+      <div class="card"><div class="header-title"><span>⚡ Additional Commitments</span><button class="btn-add-sm" onclick="openCommitmentModal('Additional')">➕ Add</button></div><div id="additionalCommitmentList">Loading...</div></div>
+      <div class="card"><div class="header-title"><span>🏦 Active Loans</span><button class="btn-add-sm" onclick="openLoanModal()">➕ Add Loan</button></div><div id="loanList">Loading...</div></div>
+    </div>
+
+    <!-- TAB 5: SIDE INCOME -->
+    <div id="tab-grab" class="tab-content">
+      <div class="single-summary-card">
+        <div class="subtitle" style="margin-top:0;" id="sideIncomePeriodLabel">Side Income — This Month</div>
+        <div class="val" id="totalSideIncomeHeader">RM 0.00</div>
+        <div class="subtitle" id="sideIncomeCount" style="margin-top:6px;">0 records</div>
+      </div>
+      <div class="card">
+        <div class="header-title">📅 Income Date Filter</div>
+        <select id="sideIncomeDateFilter" class="bank-select" onchange="onSideIncomeFilterChange()" aria-label="Filter side income by date">
+          <option value="THIS_MONTH" selected>This Month</option>
+          <option value="LAST_MONTH">Last Month</option>
+          <option value="CUSTOM">Custom Date Range</option>
+          <option value="ALL">All Time</option>
+        </select>
+        <div id="sideIncomeCustomDateRow" class="custom-date-row">
+          <div><label class="subtitle" for="sideIncomeStartDate">From</label><input id="sideIncomeStartDate" type="date" class="date-filter-input" onchange="resetSideIncomePagination()"></div>
+          <div><label class="subtitle" for="sideIncomeEndDate">To</label><input id="sideIncomeEndDate" type="date" class="date-filter-input" onchange="resetSideIncomePagination()"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="header-title">📜 Income Records</div>
+        <div id="sideIncomeRecords">Loading...</div>
+        <div id="sideIncomePaginationControls" class="income-pagination" style="display:none;" aria-label="Income records pages">
+          <div id="sideIncomeShowingCount" class="income-pagination-summary">Showing 1–5 of 5 records</div>
+          <div class="income-pagination-actions">
+            <button type="button" class="btn-add-sm" id="sideIncomePrevPage" onclick="changeSideIncomePage(-1)">◀ Prev</button>
+            <span id="sideIncomePageIndicator" aria-live="polite">Page 1 of 1</span>
+            <button type="button" class="btn-add-sm" id="sideIncomeNextPage" onclick="changeSideIncomePage(1)">Next ▶</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="nav-bar">
+    <div class="nav-item active" onclick="switchTab('dashboard', this)">📊 Home</div>
+    <div class="nav-item" onclick="switchTab('tx', this)">➕ Expense</div>
+
+    <div class="nav-item" onclick="switchTab('history', this)">📜 History</div>
+    <div class="nav-item" onclick="switchTab('commitments', this)">📅 Bills</div>
+    <div class="nav-item" onclick="switchTab('grab', this)">💰 Income</div>
+  </div>
+
+  <!-- Fullscreen chart viewer: the original canvas is moved here, not duplicated. -->
+  <div id="chartFullscreenOverlay" class="chart-fullscreen-overlay" role="dialog" aria-modal="true" aria-labelledby="chartFullscreenTitle" hidden>
+    <div class="chart-fullscreen-panel">
+      <div class="chart-fullscreen-header">
+        <div>
+          <h2 id="chartFullscreenTitle">Chart</h2>
+          <p class="chart-fullscreen-hint">Tap a slice, point, or bar to see its transactions.</p>
+        </div>
+        <button type="button" id="chartFullscreenClose" class="chart-fullscreen-close" onclick="closeChartFullscreen()" aria-label="Close enlarged chart">✕ Close</button>
+      </div>
+      <div id="chartFullscreenSlot" class="chart-fullscreen-slot"></div>
+    </div>
+  </div>
+
+  <div id="customModal" class="modal-overlay">
+    <div class="modal-card">
+      <div id="modalTitle" class="modal-title">Add Item</div>
+      <div id="modalBody"></div>
+      <div class="modal-buttons">
+        <button class="btn btn-cancel" id="modalCancelBtn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-secondary" id="modalSubmitBtn">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let accountData = [], categoryData = [], selectedCategories = null, transactionData = [], commitmentData = [], loanData = [], displayedHistoryList = [], sideIncomeRecords = [];
+    let currentSideIncomePage = 1;
+    const sideIncomeItemsPerPage = 5;
+    let knownCategoryNames = new Set();
+    let currentHistoryPage = 1, showAllHistoryMode = false; const historyItemsPerPage = 10;
+    let chartObjPie1 = null, chartObjLine = null, chartObjBar = null; let leafletMap = null, mapMarkers = [];
+    let expandedChartState = null;
+    const pastelColors = ['#fda4af', '#93c5fd', '#fde047', '#a7f3d0', '#c084fc', '#fdba74', '#cbd5e1', '#f472b6', '#38bdf8', '#fbbf24', '#e879f9', '#4ade80'];
+
+
+    // Theme is stored on this device only: no Apps Script calls and no added libraries.
+    function chartThemePalette() {
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      return light
+        ? { text:'#334155', muted:'#64748b', grid:'#e2e8f0', pieText:'#0f172a', empty:'#cbd5e1' }
+        : { text:'#cbd5e1', muted:'#94a3b8', grid:'#1e293b', pieText:'#ffffff', empty:'#334155' };
+    }
+    function syncThemeToggleLabel() {
+      const btn = document.getElementById('themeToggleBtn');
+      if (!btn) return;
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      btn.textContent = light ? '🌙 Dark' : '☀️ Light';
+      btn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+      btn.setAttribute('aria-pressed', String(light));
+    }
+    function refreshChartTheme() {
+      const ui = chartThemePalette();
+      if (chartObjPie1) {
+        chartObjPie1.options.plugins.datalabels.color = ui.pieText;
+        chartObjPie1.options.plugins.legend.labels.color = ui.text;
+        if (chartObjPie1.data.labels.length === 1 && chartObjPie1.data.labels[0] === 'No Data') {
+          chartObjPie1.data.datasets[0].backgroundColor = [ui.empty];
+        }
+        chartObjPie1.update('none');
+      }
+      if (chartObjLine) {
+        chartObjLine.options.plugins.datalabels.color = ui.text;
+        chartObjLine.options.plugins.legend.labels.color = ui.text;
+        ['x','y'].forEach(function(axis) {
+          chartObjLine.options.scales[axis].ticks.color = ui.muted;
+          chartObjLine.options.scales[axis].grid.color = ui.grid;
+        });
+        chartObjLine.update('none');
+      }
+      if (chartObjBar) {
+        chartObjBar.options.plugins.datalabels.color = ui.text;
+        ['x','y'].forEach(function(axis) {
+          chartObjBar.options.scales[axis].ticks.color = ui.muted;
+        });
+        chartObjBar.options.scales.y.grid.color = ui.grid;
+        chartObjBar.update('none');
+      }
+    }
+    function toggleTheme() {
+      const light = document.documentElement.getAttribute('data-theme') === 'light';
+      const next = light ? 'dark' : 'light';
+      if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      else document.documentElement.removeAttribute('data-theme');
+      try { localStorage.setItem('finance-dashboard-theme', next); } catch (e) {}
+      syncThemeToggleLabel();
+      refreshChartTheme();
+    }
+
+    // #region ROBUST PUBLIC-DEMO CHART LOADING
+    let chartFallbackStarted = false;
+    function showChartStatus(message, isError) {
+      const el = document.getElementById('chartLoadStatus');
+      if (!el) return;
+      el.style.display = message ? 'block' : 'none';
+      el.textContent = message || '';
+      el.style.borderColor = isError ? '#fda4af' : 'var(--border-color)';
+    }
+    function loadExtraScript(url) {
+      return new Promise(function(resolve, reject) {
+        const script = document.createElement('script');
+        script.src = url;
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = function() { reject(new Error('Cannot download ' + url)); };
+        document.head.appendChild(script);
+      });
+    }
+    async function ensureChartsLoaded() {
+      if (typeof Chart !== 'undefined') return true;
+      if (chartFallbackStarted) return false;
+      chartFallbackStarted = true;
+      showChartStatus('Loading chart library…', false);
+      try {
+        await loadExtraScript('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js');
+        if (typeof Chart === 'undefined') throw new Error('Chart.js did not initialize');
+        return true;
+      } catch (err) {
+        console.error('Chart library unavailable:', err);
+        showChartStatus('Charts could not load. Check your internet connection or browser restrictions and refresh the page. The transaction records are still available below.', true);
+        ['skel-pie','skel-line','skel-bar'].forEach(function(id){
+          const el = document.getElementById(id); if (el) el.style.display='none';
+        });
+        return false;
+      }
+    }
+    // #endregion
+    document.addEventListener("DOMContentLoaded", function() {
+      syncThemeToggleLabel();
+      // Start reading data independently of the third-party chart scripts.
+      try { initMap(); } catch(e) { console.warn('Map unavailable:', e); }
+      safeLoadData();
+      ensureChartsLoaded().then(async function(ok) {
+        if (!ok) return;
+        if (typeof ChartDataLabels === 'undefined') {
+          try { await loadExtraScript('https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js'); }
+          catch(e) { console.warn('Optional data label plugin unavailable:', e); }
+        }
+        if (typeof ChartDataLabels !== 'undefined') {
+          try { Chart.register(ChartDataLabels); } catch(e) { console.warn(e); }
+        }
+        renderCharts();
+      });
+    });
+
+    function safeLoadData() {
+      const sDate = document.getElementById('sideDate'); if(sDate) sDate.value = localDateKey(new Date());
+      try { loadAccounts(); } catch(e){ console.error(e); }
+      try { loadCategories(); } catch(e){ console.error(e); }
+      try { loadTransactions(); } catch(e){ console.error(e); }
+      try { loadCommitmentsPage(); } catch(e){ console.error(e); }
+      try { loadLoansPage(); } catch(e){ console.error(e); }
+      try { loadSideIncomePage(); } catch(e){ console.error(e); }
+    }
+
+
+    function localDateKey(date) {
+      const d = date || new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function showServerError(err) { showToast('Error: ' + (err && err.message ? err.message : 'Please try again.'), true); }
+    function showToast(msg, err) { const t = document.getElementById('toast'); t.textContent = msg; if (err) { t.style.background = '#fda4af'; t.style.color = '#881337'; } else { t.style.background = '#a7f3d0'; t.style.color = '#064e3b'; } t.style.top = '20px'; setTimeout(function() { t.style.top = '-100px'; }, 3000); }
+    function animateBalance(el, start, end, dur) { let st = null; const step = function(ts) { if (!st) st = ts; const p = Math.min((ts - st) / dur, 1); const current = start + (end - start) * (1 - Math.pow(1 - p, 4)); el.textContent = 'RM ' + current.toFixed(2); if (p < 1) window.requestAnimationFrame(step); }; window.requestAnimationFrame(step); }
+    function escapeHtml(str) { return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+    
+    function switchTab(tName, el) { document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); }); document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); }); document.getElementById('tab-' + tName).classList.add('active'); el.classList.add('active'); if (tName === 'dashboard' && leafletMap) { setTimeout(function() { leafletMap.invalidateSize(); }, 150); } }
+    function openModal(title, htmlContent, submitCallback) { document.getElementById('modalSubmitBtn').disabled = false; document.getElementById('modalSubmitBtn').style.display = 'block'; document.getElementById('modalCancelBtn').onclick = closeModal; document.getElementById('modalTitle').textContent = title; document.getElementById('modalBody').innerHTML = htmlContent; document.getElementById('modalSubmitBtn').onclick = submitCallback; document.getElementById('customModal').classList.add('active'); }
+    function closeModal() { document.getElementById('customModal').classList.remove('active'); document.getElementById('modalSubmitBtn').disabled = false; }
+    function openViewModal(title, htmlContent) { document.getElementById('modalTitle').textContent = title; document.getElementById('modalBody').innerHTML = htmlContent; document.getElementById('modalSubmitBtn').style.display = 'none'; const cancelBtn = document.getElementById('modalCancelBtn'); cancelBtn.textContent = 'Close'; cancelBtn.onclick = closeViewModal; document.getElementById('customModal').classList.add('active'); }
+    function closeViewModal() { document.getElementById('customModal').classList.remove('active'); setTimeout(function() { document.getElementById('modalSubmitBtn').style.display = 'block'; const cancelBtn = document.getElementById('modalCancelBtn'); cancelBtn.textContent = 'Cancel'; cancelBtn.onclick = closeModal; }, 300); }
+    function renderTransactionListHTML(txs) { if (!txs || txs.length === 0) return '<div style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding: 20px;">No records found.</div>'; let html = '<div style="max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px;">'; txs.slice().reverse().forEach(function(t) { const isInc = t.type === 'Income'; const tagClass = isInc ? 'tag-income' : 'tag-expense'; const sign = isInc ? '+' : '-'; html += `<div class="item-card" style="padding: 12px; margin-bottom: 0;"><div><div style="font-weight: 700; color: var(--text-heading); font-size: 0.95rem;">${escapeHtml(t.category || 'General')}</div><div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${t.date} ${t.notes ? '• ' + escapeHtml(t.notes) : ''}</div></div><div class="item-actions"><span class="tag ${tagClass}" style="font-size: 0.72rem;">${sign} RM ${t.amount.toFixed(2)}</span></div></div>`; }); html += '</div>'; return html; }
+
+    function openCategoryModal() { const html = `<label class="subtitle">Category Name:</label><input type="text" id="mCatName" placeholder="e.g. Healthcare">`; openModal("Add New Category", html, function() { const val = document.getElementById('mCatName').value.trim(); if (!val) return; google.script.run.withSuccessHandler(function(isAdded) { if (isAdded === false) showToast('Category already exists!', true); else showToast('Category Added!'); loadCategories(); closeModal(); }).withFailureHandler(showServerError).addNewCategory(val); }); }
+    function openBankModal() { const html = `<label class="subtitle">Bank / eWallet Name:</label><input type="text" id="mBankName" placeholder="e.g. CIMB, ShopeePay"><label class="subtitle">Starting Balance (RM):</label><input type="number" id="mBankBal" value="0">`; openModal("Add New Bank / Wallet", html, function() { const name = document.getElementById('mBankName').value.trim(); const bal = document.getElementById('mBankBal').value; if (!name) return; google.script.run.withSuccessHandler(function() { showToast('Account Added!'); loadAccounts(); closeModal(); }).withFailureHandler(showServerError).addNewAccount(name, bal); }); }
+    function openPlatformModal() { const html = `<label class="subtitle">Platform / Source Name:</label><input type="text" id="mPlatName" placeholder="e.g. TikTok">`; openModal("Add New Income Source", html, function() { const val = document.getElementById('mPlatName').value.trim(); if (!val) return; const select = document.getElementById('sidePlatform'); const opt = document.createElement('option'); opt.value = val; opt.textContent = val; select.appendChild(opt); select.value = val; closeModal(); }); }
+    function openCommitmentModal(type) { const html = `<label class="subtitle">Commitment Name:</label><input type="text" id="mComName" placeholder="e.g. Internet Bill"><label class="subtitle">Amount (RM):</label><input type="number" step="0.01" id="mComAmt" placeholder="0.00"><label class="subtitle">Due Date:</label><input type="text" id="mComDue" value="5th">`; openModal("Add " + type + " Commitment", html, function() { const name = document.getElementById('mComName').value.trim(); const amt = document.getElementById('mComAmt').value; const due = document.getElementById('mComDue').value; if (!name || !amt) return; google.script.run.withSuccessHandler(function() { showToast('Commitment Added!'); loadCommitmentsPage(); closeModal(); }).withFailureHandler(showServerError).addCommitment({ name: name, amount: amt, dueDate: due, type: type, category: 'Bill' }); }); }
+    function openLoanModal() { const html = `<label class="subtitle">Loan Name:</label><input type="text" id="mLoanName" placeholder="e.g. Car Loan"><label class="subtitle">Total Remaining Amount (RM):</label><input type="number" step="0.01" id="mLoanTot" placeholder="10000"><label class="subtitle">Monthly Installment (RM):</label><input type="number" step="0.01" id="mLoanMth" placeholder="500"><label class="subtitle">Months Left:</label><input type="number" id="mLoanLeft" placeholder="20">`; openModal("Add New Loan", html, function() { const name = document.getElementById('mLoanName').value.trim(); const tot = document.getElementById('mLoanTot').value; const mth = document.getElementById('mLoanMth').value; let left = document.getElementById('mLoanLeft').value; if (!left && tot && mth) left = Math.ceil(Number(tot) / Number(mth)); if (!name || !tot || !mth) return; google.script.run.withSuccessHandler(function() { showToast('Loan Saved!'); loadLoansPage(); closeModal(); }).withFailureHandler(showServerError).addLoan({ name: name, totalAmount: tot, monthly: mth, monthsLeft: left, notes: '' }); }); }
+    function promptPayLoan(row, name, defaultMonthly) { const accOptions = accountData.map(function(a) { return `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`; }).join(''); const html = `<label class="subtitle">Installment Amount (RM):</label><input type="number" step="0.01" id="mPayAmt" value="${defaultMonthly}"><label class="subtitle">Pay From Account:</label><select id="mPayAcc">${accOptions}</select>`; openModal("Pay Installment: " + escapeHtml(name), html, function() { const amt = document.getElementById('mPayAmt').value; const acc = document.getElementById('mPayAcc').value; if (!amt || Number(amt) <= 0 || !acc) { showToast('Enter a valid installment amount and account.', true); return; } const submitBtn = document.getElementById('modalSubmitBtn'); if (submitBtn.disabled) return; submitBtn.disabled = true; google.script.run.withSuccessHandler(function() { showToast('Installment Paid!'); loadLoansPage(); loadAccounts(); loadTransactions(); closeModal(); }).withFailureHandler(function(err) { submitBtn.disabled = false; showServerError(err); }).payLoanInstallment(row, name, amt, acc); }); }
+
+    function loadAccounts() {
+      google.script.run.withSuccessHandler(function(accounts) {
+        accountData = accounts || [];
+        const select = document.getElementById('accountSelect');
+        const previous = select.value;
+        const txAcc = document.getElementById('txAccount');
+        const prevTx = txAcc.value;
+        const sideAcc = document.getElementById('sideAccount');
+        const prevSide = sideAcc.value;
+        select.innerHTML = '<option value="ALL">All Accounts</option>';
+        txAcc.innerHTML = '';
+        sideAcc.innerHTML = '';
+        accountData.forEach(function(acc) {
+          [select, txAcc, sideAcc].forEach(function(dropdown) {
+            const option = document.createElement('option');
+            option.value = acc.name; option.textContent = acc.name;
+            dropdown.appendChild(option);
+          });
+        });
+        if (previous === 'ALL' || accountData.some(a => a.name === previous)) select.value = previous;
+        if (accountData.some(a => a.name === prevTx)) txAcc.value = prevTx;
+        if (accountData.some(a => a.name === prevSide)) sideAcc.value = prevSide;
+        updateBalanceView(); renderCharts();
+      }).withFailureHandler(showServerError).getAccountData();
+    }
+    
+    function syncCategoriesUI() {
+      (transactionData || []).forEach(function(t) {
+        if (!t.category || !t.category.trim()) return;
+        const trimmed = t.category.trim();
+        if (!categoryData.some(c => c.toLowerCase() === trimmed.toLowerCase())) categoryData.push(trimmed);
+      });
+      const currentSet = new Set(categoryData.map(c => c.toLowerCase()));
+      if (selectedCategories === null) {
+        selectedCategories = categoryData.filter(c => c.toLowerCase() !== 'self-transfer');
+      } else {
+        categoryData.forEach(function(cat) {
+          if (!knownCategoryNames.has(cat.toLowerCase()) && cat.toLowerCase() !== 'self-transfer') selectedCategories.push(cat);
+        });
+        selectedCategories = selectedCategories.filter(c => currentSet.has(c.toLowerCase()));
+      }
+      knownCategoryNames = currentSet;
+      const txCat = document.getElementById('txCategory');
+      const previous = txCat.value;
+      txCat.innerHTML = '';
+      categoryData.forEach(function(cat) {
+        const opt = document.createElement('option'); opt.value = cat; opt.textContent = cat; txCat.appendChild(opt);
+      });
+      if (categoryData.includes(previous)) txCat.value = previous;
+      const histCatSelect = document.getElementById('historyCategoryFilter');
+      const currentVal = histCatSelect.value;
+      histCatSelect.innerHTML = '<option value="ALL">All Categories</option>';
+      categoryData.forEach(function(cat) {
+        const opt = document.createElement('option'); opt.value = cat; opt.textContent = cat;
+        histCatSelect.appendChild(opt);
+      });
+      if (categoryData.includes(currentVal)) histCatSelect.value = currentVal;
+      renderCategoryCheckboxes(); renderCharts();
+    }
+    function loadCategories() { google.script.run.withSuccessHandler(function(categories) { categoryData = categories ? [...categories] : []; syncCategoriesUI(); }).getCategoryData(); }
+    function toggleCategoryFilterPanel() { const panel = document.getElementById('categoryFilterPanel'); panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; }
+    function renderCategoryCheckboxes() { const container = document.getElementById('categoryCheckboxContainer'); container.innerHTML = ''; categoryData.forEach(function(cat) { const isChecked = selectedCategories && selectedCategories.some(function(sc) { return sc.toLowerCase() === cat.toLowerCase(); }); const label = document.createElement('label'); label.className = 'checkbox-label'; label.style.fontSize = '0.78rem'; label.style.color = 'var(--text-muted)'; label.innerHTML = `<input type="checkbox" value="${escapeHtml(cat)}" ${isChecked ? 'checked' : ''} onchange="onCategoryCheckboxChange()">${escapeHtml(cat)}`; container.appendChild(label); }); updateCategoryFilterButtonText(); }
+    function onCategoryCheckboxChange() { const checkboxes = document.querySelectorAll('#categoryCheckboxContainer input[type="checkbox"]'); selectedCategories = []; checkboxes.forEach(function(cb) { if (cb.checked) selectedCategories.push(cb.value); }); updateCategoryFilterButtonText(); renderCharts(); }
+    function selectAllCategories(selectState) { selectedCategories = selectState ? [...categoryData] : []; renderCategoryCheckboxes(); renderCharts(); }
+    function updateCategoryFilterButtonText() { const countTag = document.getElementById('catFilterCountText'); if (!selectedCategories) return; if (selectedCategories.length === categoryData.length) { countTag.textContent = 'All Included'; } else if (selectedCategories.length === 0) { countTag.textContent = 'None Included'; } else if (categoryData.some(function(c) { return c.toLowerCase() === 'self-transfer'; }) && !selectedCategories.some(function(sc) { return sc.toLowerCase() === 'self-transfer'; }) && selectedCategories.length === (categoryData.length - 1)) { countTag.textContent = 'Excl. Self-Transfer'; } else { countTag.textContent = selectedCategories.length + ' of ' + categoryData.length + ' Active'; } }
+    
+    function loadTransactions() { google.script.run.withSuccessHandler(function(txs) { transactionData = txs || []; if (categoryData.length > 0) syncCategoriesUI(); else renderCharts(); renderHistoryList(); }).withFailureHandler(function(err) { showToast('Error loading transactions: ' + err.message, true); }).getTransactionData(); }
+    function onDateFilterTypeChange() { const val = document.getElementById('dateFilterSelect').value; const customRow = document.getElementById('customDateRow'); if (val === 'CUSTOM') { customRow.style.display = 'grid'; } else { customRow.style.display = 'none'; onFilterChange(); } }
+    function onFilterChange() { updateBalanceView(); renderCharts(); }
+    function updateBalanceView() { const selected = document.getElementById('accountSelect').value; const balanceText = document.getElementById('balanceText'); const currentDisplayed = parseFloat(balanceText.textContent.replace(/[^\d.-]/g, '')) || 0; let targetBalance = 0; if (selected === 'ALL') { targetBalance = accountData.reduce(function(sum, a) { return sum + a.balance; }, 0); } else { const acc = accountData.find(function(a) { return a.name.toLowerCase() === selected.toLowerCase(); }); targetBalance = acc ? acc.balance : 0; } animateBalance(balanceText, currentDisplayed, targetBalance, 800); }
+    function getFilteredTransactions() {
+      const selectedAccount = document.getElementById('accountSelect').value;
+      const period = document.getElementById('dateFilterSelect').value;
+      const now = new Date();
+      const thisMonth = localDateKey(new Date(now.getFullYear(), now.getMonth(), 1)).slice(0, 7);
+      const lastMonth = localDateKey(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+      const start = document.getElementById('filterStartDate').value;
+      const end = document.getElementById('filterEndDate').value;
+      return (transactionData || []).filter(function(t) {
+        if (selectedAccount !== 'ALL' && t.account.toLowerCase() !== selectedAccount.toLowerCase()) return false;
+        if (selectedCategories !== null && !selectedCategories.some(c => c.toLowerCase() === (t.category || '').trim().toLowerCase())) return false;
+        const dateKey = t.dateKey || (t.isoDate ? localDateKey(new Date(t.isoDate)) : '');
+        if (period === 'THIS_MONTH') return dateKey.slice(0, 7) === thisMonth;
+        if (period === 'LAST_MONTH') return dateKey.slice(0, 7) === lastMonth;
+        if (period === 'CUSTOM') {
+          if (start && dateKey < start) return false;
+          if (end && dateKey > end) return false;
+          if ((start || end) && !dateKey) return false;
+        }
+        return true;
+      });
+    }
+
+    function initMap() { if (typeof L === 'undefined') return; if (leafletMap) leafletMap.remove(); leafletMap = L.map('mapContainer', { zoomControl: false }).setView([3.1390, 101.6869], 11); L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OSM', maxZoom: 19 }).addTo(leafletMap); }
+    function updateLocationMap(filteredTxs) { if (!leafletMap) return; mapMarkers.forEach(function(m) { leafletMap.removeLayer(m); }); mapMarkers = []; const coordsMap = {}; filteredTxs.filter(function(t) { return t.type === 'Expense' && t.coords; }).forEach(function(t) { if (!coordsMap[t.coords]) coordsMap[t.coords] = { amount: 0, items: [] }; coordsMap[t.coords].amount += t.amount; coordsMap[t.coords].items.push(t); }); const bounds = L.latLngBounds(); Object.keys(coordsMap).forEach(function(coordStr) { const parts = coordStr.split(','); const lat = parseFloat(parts[0].trim()); const lng = parseFloat(parts[1].trim()); if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return; const data = coordsMap[coordStr]; const radius = Math.min(Math.max(data.amount / 15, 6), 24); const circle = L.circleMarker([lat, lng], { color: '#f43f5e', fillColor: '#fda4af', fillOpacity: 0.7, radius: radius, weight: 2 }).addTo(leafletMap); const safeLocName = data.items[0].location ? escapeHtml(data.items[0].location) : 'Pinned Location'; let popupHtml = `<div style="text-align:center;"><div style="font-weight:800;font-size:1.1rem;color:#f43f5e;">RM ${data.amount.toFixed(2)}</div><div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;">${safeLocName}</div>`; data.items.slice(0, 3).forEach(function(i) { popupHtml += `<div style="font-size:0.8rem;border-top:1px solid #334155;padding-top:4px;margin-top:4px;">${escapeHtml(i.category)}: RM ${i.amount.toFixed(2)}</div>`; }); if (data.items.length > 3) popupHtml += `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:4px;">+ ${data.items.length - 3} more</div>`; popupHtml += `</div>`; circle.bindPopup(popupHtml); mapMarkers.push(circle); bounds.extend([lat, lng]); }); if (bounds.isValid()) { leafletMap.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 }); } }
+
+    function chartForKind(kind) {
+      return kind === 'pie' ? chartObjPie1 : kind === 'line' ? chartObjLine : kind === 'bar' ? chartObjBar : null;
+    }
+
+    function isChartExpanded(kind) {
+      return !!(expandedChartState && expandedChartState.kind === kind);
+    }
+
+    function openChartFullscreen(kind) {
+      const titles = { pie: '🍕 Expenses by Category', line: '📈 Daily Cashflow Trend', bar: '📊 Cashflow Comparison' };
+      const canvasIds = { pie: 'pieChart1', line: 'lineChart', bar: 'barChart' };
+      if (!titles[kind] || !chartForKind(kind)) return;
+      if (isChartExpanded(kind)) { closeChartFullscreen(); return; }
+      if (expandedChartState) closeChartFullscreen();
+      const canvas = document.getElementById(canvasIds[kind]);
+      const holder = canvas.parentElement;
+      expandedChartState = {
+        kind: kind, holder: holder, parent: holder.parentElement,
+        nextSibling: holder.nextSibling, focusReturn: document.activeElement
+      };
+      document.getElementById('chartFullscreenTitle').textContent = titles[kind];
+      document.getElementById('chartFullscreenSlot').appendChild(holder);
+      document.getElementById('chartFullscreenOverlay').hidden = false;
+      document.body.classList.add('chart-expanded');
+      requestAnimationFrame(function() {
+        const chart = chartForKind(kind);
+        if (chart) chart.resize();
+        document.getElementById('chartFullscreenClose').focus();
+      });
+    }
+
+    function closeChartFullscreen() {
+      if (!expandedChartState) return;
+      const state = expandedChartState;
+      expandedChartState = null;
+      if (state.nextSibling && state.nextSibling.parentNode === state.parent) {
+        state.parent.insertBefore(state.holder, state.nextSibling);
+      } else {
+        state.parent.appendChild(state.holder);
+      }
+      document.getElementById('chartFullscreenOverlay').hidden = true;
+      document.body.classList.remove('chart-expanded');
+      requestAnimationFrame(function() {
+        const chart = chartForKind(state.kind);
+        if (chart) chart.resize();
+        if (state.focusReturn && state.focusReturn.isConnected && typeof state.focusReturn.focus === 'function') {
+          state.focusReturn.focus();
+        }
+      });
+    }
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && expandedChartState) closeChartFullscreen();
+    });
+
+    function renderCharts() {
+      if (typeof Chart === 'undefined') return;
+      try {
+        renderChartsCore();
+        showChartStatus('', false);
+      } catch (err) {
+        console.error('Chart rendering failed:', err);
+        showChartStatus('Charts could not render: ' + (err && err.message ? err.message : 'Unknown error') + '. Refresh to retry.', true);
+        ['skel-pie','skel-line','skel-bar'].forEach(function(id){
+          const el = document.getElementById(id); if (el) el.style.display='none';
+        });
+      }
+    }
+    function renderChartsCore() { if (typeof Chart === 'undefined') return; const ui = chartThemePalette(); const filtered = getFilteredTransactions(); try { updateLocationMap(filtered); } catch(e) { console.error("Map update error:", e); } const categoryTotals = {}; filtered.filter(function(t) { return t.type === 'Expense'; }).forEach(function(t) { const cat = t.category || 'General'; categoryTotals[cat] = (categoryTotals[cat] || 0) + t.amount; }); const catLabels = Object.keys(categoryTotals); const catData = Object.values(categoryTotals); const chartColors = catData.map(function(_, idx) { return pastelColors[idx % pastelColors.length]; }); if (chartObjPie1) chartObjPie1.destroy(); chartObjPie1 = new Chart(document.getElementById('pieChart1').getContext('2d'), { type: 'pie', data: { labels: catLabels.length ? catLabels : ['No Data'], datasets: [{ data: catData.length ? catData : [1], backgroundColor: catData.length ? chartColors : [ui.empty] }] }, options: { responsive: true, maintainAspectRatio: false, onClick: function(e, elements, chart) { if (!isChartExpanded('pie')) { openChartFullscreen('pie'); return; } if (!elements.length || !catData.length) return; const clickedLabel = chart.data.labels[elements[0].index]; const matchingTxs = filtered.filter(function(t) { return t.type === 'Expense' && (t.category || 'General') === clickedLabel; }); openViewModal(`Expenses: ${clickedLabel}`, renderTransactionListHTML(matchingTxs)); }, onHover: function(event, chartElement) { event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'; }, plugins: { datalabels: { color: ui.pieText, font: { weight: 'bold', size: 10 }, formatter: function(val) { if (!catData.length || val <= 0) return ''; const sum = catData.reduce(function(a, b) { return a + b; }, 0); const pct = sum ? (100 * val / sum) : 0; return pct >= 5 ? pct.toFixed(pct < 10 ? 1 : 0) + '%' : ''; } }, tooltip: { callbacks: { label: function(ctx) { if (!catData.length) return 'No expenses'; const sum = catData.reduce(function(a, b) { return a + b; }, 0); const amt = Number(ctx.parsed) || 0; const pct = sum ? (100 * amt / sum) : 0; return ctx.label + ': RM ' + amt.toFixed(2) + ' (' + pct.toFixed(1) + '%)'; } } }, legend: { position: 'bottom', labels: { color: ui.text, font: { size: 11 } } } } } }); const dailyExpense = {}; const dailyIncome = {}; const dateMap = new Map(); filtered.slice().sort(function(a, b) { return (a.dateKey || '').localeCompare(b.dateKey || ''); }).forEach(function(t) { const key = t.dateKey; if (!key) return; dateMap.set(key, t.date); if (t.type === 'Expense') { dailyExpense[key] = (dailyExpense[key] || 0) + t.amount; } else if (t.type === 'Income') { dailyIncome[key] = (dailyIncome[key] || 0) + t.amount; } }); const dateKeys = Array.from(dateMap.keys()); const dates = dateKeys.map(function(key) { return dateMap.get(key); }); const expData = dateKeys.map(function(key) { return dailyExpense[key] || 0; }); const incData = dateKeys.map(function(key) { return dailyIncome[key] || 0; }); if (chartObjLine) chartObjLine.destroy(); chartObjLine = new Chart(document.getElementById('lineChart').getContext('2d'), { type: 'line', data: { labels: dates.length ? dates : ['No Data'], datasets: [ { label: 'Income (+)', data: dates.length ? incData : [0], borderColor: '#a7f3d0', backgroundColor: 'rgba(167, 243, 208, 0.2)', fill: true, tension: 0.3, borderWidth: 2, pointRadius: dates.length > 20 ? 0 : 3, pointHoverRadius: 5, pointHitRadius: 12 }, { label: 'Spending (-)', data: dates.length ? expData : [0], borderColor: '#fda4af', backgroundColor: 'rgba(253, 164, 175, 0.2)', fill: true, tension: 0.3, borderWidth: 2, pointRadius: dates.length > 20 ? 0 : 3, pointHoverRadius: 5, pointHitRadius: 12 } ] }, options: { responsive: true, maintainAspectRatio: false, onClick: function(e, elements, chart) { if (!isChartExpanded('line')) { openChartFullscreen('line'); return; } if (!elements.length || !dates.length) return; const datasetIndex = elements[0].datasetIndex; const dataIndex = elements[0].index; const clickedDate = chart.data.labels[dataIndex]; const clickedType = datasetIndex === 0 ? 'Income' : 'Expense'; const matchingTxs = filtered.filter(function(t) { return t.dateKey === dateKeys[dataIndex] && t.type === clickedType; }); openViewModal(`${clickedType} on ${clickedDate}`, renderTransactionListHTML(matchingTxs)); }, onHover: function(event, chartElement) { event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'; }, plugins: { datalabels: { display: false, color: ui.text }, legend: { display: true, position: 'top', labels: { color: ui.text, font: { size: 10 }, boxWidth: 12 } } }, scales: { x: { ticks: { color: ui.muted, font: { size: 10 }, autoSkip: true, maxTicksLimit: 6 }, grid: { color: ui.grid } }, y: { beginAtZero: true, grace: '20%', ticks: { color: ui.muted, font: { size: 10 }, callback: function(v) { return v >= 1000 ? 'RM ' + (v / 1000).toFixed(1) + 'k' : 'RM ' + v; } }, grid: { color: ui.grid } } } } }); let totalInc = incData.reduce(function(a, b) { return a + b; }, 0); let totalExp = expData.reduce(function(a, b) { return a + b; }, 0); if (chartObjBar) chartObjBar.destroy(); chartObjBar = new Chart(document.getElementById('barChart').getContext('2d'), { type: 'bar', data: { labels: ['Income (+)', 'Expense (-)'], datasets: [{ data: [totalInc, totalExp], backgroundColor: ['#a7f3d0', '#fda4af'], borderRadius: 6 }] }, options: { responsive: true, maintainAspectRatio: false, onClick: function(e, elements) { if (!isChartExpanded('bar')) { openChartFullscreen('bar'); return; } if (!elements.length) return; const index = elements[0].index; const type = index === 0 ? 'Income' : 'Expense'; if ((type === 'Income' && totalInc === 0) || (type === 'Expense' && totalExp === 0)) return; const matchingTxs = filtered.filter(function(t) { return t.type === type; }); openViewModal(`Total ${type}`, renderTransactionListHTML(matchingTxs)); }, onHover: function(event, chartElement) { event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default'; }, plugins: { datalabels: { anchor: 'end', align: 'top', color: ui.text, font: { weight: 'bold', size: 11 }, formatter: function(val) { return 'RM ' + val.toFixed(2); } }, legend: { display: false } }, scales: { x: { ticks: { color: ui.muted, font: { size: 11 } }, grid: { display: false } }, y: { beginAtZero: true, grace: '20%', ticks: { color: ui.muted, font: { size: 11 }, callback: function(v) { return v >= 1000 ? 'RM ' + (v / 1000).toFixed(1) + 'k' : 'RM ' + v; } }, grid: { color: ui.grid } } } } }); setTimeout(function() { const pieCanvas = document.getElementById('pieChart1'); const lineCanvas = document.getElementById('lineChart'); const barCanvas = document.getElementById('barChart'); const skelPie = document.getElementById('skel-pie'); const skelLine = document.getElementById('skel-line'); const skelBar = document.getElementById('skel-bar'); if (pieCanvas) pieCanvas.classList.add('loaded'); if (lineCanvas) lineCanvas.classList.add('loaded'); if (barCanvas) barCanvas.classList.add('loaded'); if (skelPie) skelPie.style.display = 'none'; if (skelLine) skelLine.style.display = 'none'; if (skelBar) skelBar.style.display = 'none'; }, 150); }
+    // Public demo: GPS capture and transaction submission are intentionally removed.
+
+    function resetHistoryPaginationAndRender() { currentHistoryPage = 1; renderHistoryList(); }
+    function changeHistoryPage(direction) { currentHistoryPage += direction; renderHistoryList(); }
+    function toggleShowAllHistory() { showAllHistoryMode = !showAllHistoryMode; currentHistoryPage = 1; renderHistoryList(); }
+
+    function renderHistoryList() { const selectedCat = (document.getElementById('historyCategoryFilter').value || 'ALL').toLowerCase(); const search = (document.getElementById('historySearch').value || '').toLowerCase(); const container = document.getElementById('historyListContainer'); const countTag = document.getElementById('historyCountTag'); displayedHistoryList = (transactionData || []).slice().reverse().filter(function(t) { if (selectedCat !== 'all' && (t.category && t.category.toLowerCase() !== selectedCat)) return false; if (search) { const notesMatch = t.notes && t.notes.toLowerCase().indexOf(search) !== -1; const accMatch = t.account && t.account.toLowerCase().indexOf(search) !== -1; const catMatch = t.category && t.category.toLowerCase().indexOf(search) !== -1; const locMatch = t.location && t.location.toLowerCase().indexOf(search) !== -1; if (!notesMatch && !accMatch && !catMatch && !locMatch) return false; } return true; }); countTag.textContent = displayedHistoryList.length + ' items'; if (!displayedHistoryList.length) { container.innerHTML = `<div style="text-align: center; padding: 40px 20px; color: var(--text-muted);"><div style="font-size: 3rem; margin-bottom: 12px; opacity: 0.5;">🍃</div><div style="font-weight: 600; font-size: 1rem; color: var(--text-muted);">It's quiet here.</div><div style="font-size: 0.85rem; margin-top: 4px;">No transactions found for this filter.</div></div>`; document.getElementById('historyPaginationControls').style.display = 'none'; document.getElementById('btnToggleShowAll').style.display = 'none'; return; } let displayList = displayedHistoryList; let startIndex = 0; const totalPages = Math.ceil(displayedHistoryList.length / historyItemsPerPage) || 1; if (!showAllHistoryMode) { if (currentHistoryPage > totalPages) currentHistoryPage = totalPages; if (currentHistoryPage < 1) currentHistoryPage = 1; startIndex = (currentHistoryPage - 1) * historyItemsPerPage; displayList = displayedHistoryList.slice(startIndex, startIndex + historyItemsPerPage); document.getElementById('historyPaginationControls').style.display = 'flex'; document.getElementById('historyPageIndicator').textContent = `Page ${currentHistoryPage} of ${totalPages}`; document.getElementById('btnPrevPage').disabled = (currentHistoryPage === 1); document.getElementById('btnNextPage').disabled = (currentHistoryPage === totalPages); document.getElementById('btnPrevPage').style.opacity = (currentHistoryPage === 1) ? '0.5' : '1'; document.getElementById('btnNextPage').style.opacity = (currentHistoryPage === totalPages) ? '0.5' : '1'; document.getElementById('btnToggleShowAll').textContent = `👁️ Show All (${displayedHistoryList.length})`; document.getElementById('btnToggleShowAll').style.display = (displayedHistoryList.length > historyItemsPerPage) ? 'block' : 'none'; } else { document.getElementById('historyPaginationControls').style.display = 'none'; document.getElementById('btnToggleShowAll').textContent = '📄 Show Pages'; document.getElementById('btnToggleShowAll').style.display = 'block'; } let html = ''; displayList.forEach(function(t, idx) { const actualIndex = startIndex + idx; const isInc = t.type === 'Income'; const tagClass = isInc ? 'tag-income' : 'tag-expense'; const sign = isInc ? '+' : '-'; const mapLink = t.coords ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(t.coords)}" target="_blank" style="color:var(--accent-purple); text-decoration:none; margin-left:4px; font-weight:700;">📍 Map</a>` : ''; html += `<div class="item-card"><div><div style="font-weight: 700; color: var(--text-heading);">${escapeHtml(t.category || 'General')} <span style="font-size:0.75rem; color:var(--text-muted);">(${escapeHtml(t.account || '')})</span></div><div style="font-size: 0.8rem; color: var(--text-muted);">${t.date} ${t.location ? '• ' + escapeHtml(t.location) : ''} ${mapLink} ${t.notes ? '• ' + escapeHtml(t.notes) : ''}</div></div><div class="item-actions"><span class="tag ${tagClass}">${sign} RM ${t.amount.toFixed(2)}</span></div></div>`; }); container.innerHTML = html; }
+
+    function confirmDeleteTxByIndex(idx) {
+      const t = displayedHistoryList[idx];
+      if (t) confirmDeleteTx(t.row, t.type, t.amount, t.account);
+    }
+    function promptEditCommitmentByRow(row) {
+      const item = commitmentData.find(c => c.row === row);
+      if (item) promptEditCommitment(item.row, item.name, item.amount, item.dueDate);
+    }
+    function promptPayLoanByRow(row) {
+      const loan = loanData.find(l => l.row === row);
+      if (loan) promptPayLoan(loan.row, loan.name, loan.monthly);
+    }
+    function handleEditByIndex(idx) { const t = displayedHistoryList[idx]; if (!t) return; promptEditTx(t.row, t.type, t.amount, t.category, t.account, t.notes || '', t.location || '', t.coords || ''); }
+    function promptEditTx(row, curType, curAmt, curCat, curAcc, curNotes, curLoc, curCoords) { const accOptions = accountData.map(function(a) { return `<option value="${escapeHtml(a.name)}" ${a.name === curAcc ? 'selected' : ''}>${escapeHtml(a.name)}</option>`; }).join(''); const html = `<label class="subtitle">Amount (RM):</label><input type="number" step="0.01" id="mEditAmt" value="${curAmt}"><label class="subtitle">Category:</label><input type="text" id="mEditCat" value="${escapeHtml(curCat)}"><label class="subtitle">Location:</label><input type="text" id="mEditLoc" value="${escapeHtml(curLoc)}"><label class="subtitle">Account:</label><select id="mEditAcc">${accOptions}</select><label class="subtitle">Notes:</label><input type="text" id="mEditNotes" value="${escapeHtml(curNotes)}">`; openModal("Edit Transaction", html, function() { google.script.run.withSuccessHandler(function() { showToast('Updated!'); loadAccounts(); loadTransactions(); closeModal(); }).withFailureHandler(showServerError).editTransaction({ row: row, oldType: curType, oldAmount: curAmt, oldAccount: curAcc, type: curType, amount: document.getElementById('mEditAmt').value, category: document.getElementById('mEditCat').value, account: document.getElementById('mEditAcc').value, notes: document.getElementById('mEditNotes').value, location: document.getElementById('mEditLoc').value, coords: curCoords }); }); }
+    function confirmDeleteTx(row, type, amount, account) { if (confirm("Delete this transaction of RM " + Number(amount).toFixed(2) + "?")) { google.script.run.withSuccessHandler(function() { showToast('Deleted'); loadAccounts(); loadTransactions(); }).withFailureHandler(showServerError).deleteTransaction(row, type, amount, account); } }
+
+    function loadCommitmentsPage() { google.script.run.withSuccessHandler(function(items) { commitmentData = items || []; let totalUnpaidCommitment = 0; let monthlyHtml = ''; let additionalHtml = ''; commitmentData.forEach(function(item) { const isPaid = item.status === 'Paid'; if (!isPaid) totalUnpaidCommitment += item.amount; const safeName = escapeHtml(item.name); const safeDue = escapeHtml(item.dueDate); const cardHtml = `<div class="item-card"><div style="display: flex; align-items: center; gap: 12px;"><label class="checkbox-label"><input type="checkbox" ${isPaid ? 'checked' : ''} onchange="toggleStatus(${item.row}, '${item.status}')"></label><div><div style="font-weight: 700; color: var(--text-heading); ${isPaid ? 'text-decoration: line-through; color: var(--text-muted);' : ''}">${safeName}</div><div style="font-size: 0.85rem; color: var(--text-muted);">Due: ${safeDue} | RM ${item.amount.toFixed(2)}</div></div></div><div class="item-actions"><button class="action-btn" onclick="promptEditCommitmentByRow(${item.row})">✏️</button><button class="action-btn" onclick="confirmDeleteCommitment(${item.row})">🗑️</button></div></div>`; if (item.type === 'Additional') additionalHtml += cardHtml; else monthlyHtml += cardHtml; }); document.getElementById('totalCommitmentHeader').textContent = 'RM ' + totalUnpaidCommitment.toFixed(2); document.getElementById('monthlyCommitmentList').innerHTML = monthlyHtml || '<div style="color:var(--text-muted); font-size:0.85rem;">No monthly commitments listed.</div>'; document.getElementById('additionalCommitmentList').innerHTML = additionalHtml || '<div style="color:var(--text-muted); font-size:0.85rem;">No additional commitments listed.</div>'; }).withFailureHandler(showServerError).getCommitmentData(); }
+    function promptEditCommitment(row, curName, curAmt, curDue) { openModal("Edit Commitment", `<label class="subtitle">Name:</label><input type="text" id="mComEditName" value="${escapeHtml(curName)}"><label class="subtitle">Amt (RM):</label><input type="number" step="0.01" id="mComEditAmt" value="${curAmt}"><label class="subtitle">Due Date:</label><input type="text" id="mComEditDue" value="${escapeHtml(curDue)}">`, function() { google.script.run.withSuccessHandler(function() { showToast('Updated!'); loadCommitmentsPage(); closeModal(); }).withFailureHandler(showServerError).editCommitment(row, document.getElementById('mComEditName').value, document.getElementById('mComEditAmt').value, document.getElementById('mComEditDue').value); }); }
+    function confirmDeleteCommitment(row) { if (confirm("Delete this commitment?")) { google.script.run.withSuccessHandler(function() { showToast('Deleted'); loadCommitmentsPage(); }).withFailureHandler(showServerError).deleteCommitment(row); } }
+    function toggleStatus(row, currentStatus) { google.script.run.withSuccessHandler(function() { if (currentStatus === 'Pending') showToast('Marked as Paid! ✅'); loadCommitmentsPage(); }).withFailureHandler(showServerError).toggleCommitmentStatus(row, currentStatus); }
+
+    function loadLoansPage() { google.script.run.withSuccessHandler(function(loans) { loanData = loans || []; let totalLoanSum = 0; let loanHtml = ''; loanData.forEach(function(loan) { totalLoanSum += loan.totalAmount; loanHtml += `<div class="item-card"><div><div style="font-weight: 700; color: var(--text-heading);">${escapeHtml(loan.name)}</div><div style="font-size: 0.82rem; color: var(--text-muted);">Total: RM ${loan.totalAmount.toFixed(2)} | Monthly: RM ${loan.monthly.toFixed(2)}</div><div style="font-size: 0.8rem; color: var(--loan-label, #fde047); font-weight: 600; margin-top: 3px;">⏳ ${loan.monthsLeft} month${loan.monthsLeft === 1 ? '' : 's'} left</div></div><div class="item-actions"><button class="btn-pay-sm" onclick="promptPayLoanByRow(${loan.row})">Pay RM ${loan.monthly}</button><button class="action-btn" onclick="confirmDeleteLoan(${loan.row})">🗑️</button></div></div>`; }); document.getElementById('totalLoanHeader').textContent = 'RM ' + totalLoanSum.toFixed(2); document.getElementById('loanList').innerHTML = loanHtml || '<div style="color:var(--text-muted); font-size:0.85rem;">No active loans listed.</div>'; }).withFailureHandler(showServerError).getLoanData(); }
+    function confirmDeleteLoan(row) { if (confirm("Delete this loan record?")) { google.script.run.withSuccessHandler(function() { showToast('Deleted'); loadLoansPage(); }).withFailureHandler(showServerError).deleteLoan(row); } }
+    function loadSideIncomePage() {
+      google.script.run.withSuccessHandler(function(res) {
+        sideIncomeRecords = res && Array.isArray(res.records) ? res.records : [];
+        // Keep custom source options available even after refreshing the page.
+        const platformSelect = document.getElementById('sidePlatform');
+        const currentPlatform = platformSelect.value;
+        sideIncomeRecords.forEach(function(record) {
+          if (!Array.from(platformSelect.options).some(o => o.value === record.platform)) {
+            const option = document.createElement('option');
+            option.value = record.platform; option.textContent = record.platform;
+            platformSelect.appendChild(option);
+          }
+        });
+        platformSelect.value = currentPlatform;
+        renderSideIncome();
+      }).withFailureHandler(showServerError).getSideIncomeData();
+    }
+    function submitSideIncome() {
+      const amount = Number(document.getElementById('sideAmount').value);
+      const date = document.getElementById('sideDate').value;
+      const account = document.getElementById('sideAccount').value;
+      if (!Number.isFinite(amount) || amount <= 0) { showToast('Please enter earnings greater than RM 0.', true); return; }
+      if (!date) { showToast('Please select an income date.', true); return; }
+      if (!account) { showToast('Please choose the deposit account.', true); return; }
+      const btn = document.getElementById('saveSideIncomeBtn');
+      btn.disabled = true; btn.textContent = 'Saving...';
+      google.script.run.withSuccessHandler(function() {
+        btn.disabled = false; btn.textContent = 'Record Earnings';
+        document.getElementById('sideAmount').value = '';
+        showToast('Income Recorded!');
+        currentSideIncomePage = 1;
+        loadAccounts(); loadTransactions(); loadSideIncomePage();
+        // Stay on Income so the filter and newest record remain visible.
+      }).withFailureHandler(function(err) {
+        btn.disabled = false; btn.textContent = 'Record Earnings'; showServerError(err);
+      }).addSideIncome({ date: date, platform: document.getElementById('sidePlatform').value, amount: amount, account: account });
+    }
+
+    function onSideIncomeFilterChange() {
+      const custom = document.getElementById('sideIncomeDateFilter').value === 'CUSTOM';
+      document.getElementById('sideIncomeCustomDateRow').style.display = custom ? 'grid' : 'none';
+      resetSideIncomePagination();
+    }
+
+    function resetSideIncomePagination() {
+      currentSideIncomePage = 1;
+      renderSideIncome();
+    }
+
+    function changeSideIncomePage(direction) {
+      if (direction !== -1 && direction !== 1) return;
+      currentSideIncomePage += direction;
+      renderSideIncome();
+      const records = document.getElementById('sideIncomeRecords');
+      if (records) records.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function getFilteredSideIncome() {
+      const period = document.getElementById('sideIncomeDateFilter').value;
+      const now = new Date();
+      const thisMonth = localDateKey(new Date(now.getFullYear(), now.getMonth(), 1)).slice(0, 7);
+      const lastMonth = localDateKey(new Date(now.getFullYear(), now.getMonth() - 1, 1)).slice(0, 7);
+      const start = document.getElementById('sideIncomeStartDate').value;
+      const end = document.getElementById('sideIncomeEndDate').value;
+      return sideIncomeRecords.filter(function(record) {
+        const dateKey = record.dateKey || '';
+        if (period === 'THIS_MONTH') return dateKey.slice(0, 7) === thisMonth;
+        if (period === 'LAST_MONTH') return dateKey.slice(0, 7) === lastMonth;
+        if (period === 'CUSTOM') {
+          if (start && dateKey < start) return false;
+          if (end && dateKey > end) return false;
+          if ((start || end) && !dateKey) return false;
+        }
+        return true;
+      });
+    }
+
+    function confirmDeleteSideIncome(row) {
+      const record = sideIncomeRecords.find(r => r.row === row);
+      if (!record || !confirm('Delete income of RM ' + record.amount.toFixed(2) + ' from ' + record.platform + '? This also reverses the account balance.')) return;
+      google.script.run.withSuccessHandler(function() {
+        showToast('Income deleted and balance updated.');
+        loadSideIncomePage(); loadTransactions(); loadAccounts();
+      }).withFailureHandler(showServerError).deleteSideIncome(record.row, record.platform, record.amount, record.account, record.dateKey);
+    }
+
+    function renderSideIncome() {
+      const periodSelect = document.getElementById('sideIncomeDateFilter');
+      const label = periodSelect.options[periodSelect.selectedIndex].textContent;
+      const periodLabel = document.getElementById('sideIncomePeriodLabel');
+      const start = document.getElementById('sideIncomeStartDate').value;
+      const end = document.getElementById('sideIncomeEndDate').value;
+      const pagination = document.getElementById('sideIncomePaginationControls');
+      if (periodSelect.value === 'CUSTOM' && start && end && start > end) {
+        periodLabel.textContent = 'Invalid Date Range';
+        document.getElementById('totalSideIncomeHeader').textContent = 'RM 0.00';
+        document.getElementById('sideIncomeCount').textContent = 'Start date must be before end date';
+        document.getElementById('sideIncomeRecords').innerHTML = '<div class="empty-income">Please choose a valid date range.</div>';
+        pagination.style.display = 'none';
+        return;
+      }
+      const records = getFilteredSideIncome().sort(function(a, b) {
+        return (b.dateKey || '').localeCompare(a.dateKey || '') || b.row - a.row;
+      });
+      const total = records.reduce(function(sum, record) { return sum + record.amount; }, 0);
+      const amountText = 'RM ' + total.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      periodLabel.textContent = 'Side Income — ' + label;
+      document.getElementById('totalSideIncomeHeader').textContent = amountText;
+      document.getElementById('sideIncomeCount').textContent = records.length + (records.length === 1 ? ' record' : ' records');
+      const container = document.getElementById('sideIncomeRecords');
+      if (!records.length) {
+        container.innerHTML = '<div class="empty-income">No income records for this period.</div>';
+        pagination.style.display = 'none';
+        currentSideIncomePage = 1;
+        return;
+      }
+      const totalPages = Math.ceil(records.length / sideIncomeItemsPerPage);
+      currentSideIncomePage = Math.max(1, Math.min(currentSideIncomePage, totalPages));
+      const startIndex = (currentSideIncomePage - 1) * sideIncomeItemsPerPage;
+      const pageRecords = records.slice(startIndex, startIndex + sideIncomeItemsPerPage);
+      pagination.style.display = totalPages > 1 ? 'block' : 'none';
+      document.getElementById('sideIncomeShowingCount').textContent =
+        'Showing ' + (startIndex + 1) + '–' + (startIndex + pageRecords.length) + ' of ' + records.length + ' records';
+      document.getElementById('sideIncomePageIndicator').textContent = 'Page ' + currentSideIncomePage + ' of ' + totalPages;
+      document.getElementById('sideIncomePrevPage').disabled = currentSideIncomePage === 1;
+      document.getElementById('sideIncomeNextPage').disabled = currentSideIncomePage === totalPages;
+      container.innerHTML = pageRecords.map(function(record) {
+        return `<div class="item-card"><div class="income-record-info"><div class="income-record-title">${escapeHtml(record.platform)}</div><div class="income-record-subtitle">${escapeHtml(record.date)} · ${escapeHtml(record.account)}</div></div><div class="item-actions"><span class="tag tag-income">+ RM ${record.amount.toFixed(2)}</span><button class="action-btn" aria-label="Delete side income entry" onclick="confirmDeleteSideIncome(${record.row})">🗑️</button></div></div>`;
+      }).join('');
+    }
+  </script>
+</body>
+</html>
